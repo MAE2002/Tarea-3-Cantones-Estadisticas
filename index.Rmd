@@ -1,0 +1,352 @@
+---
+title: "Tarea 3-tablero-de-control-con-flexdashboard"
+author: "Pedro Báez Marin y Mariano Arroyo Elizondo"
+output: 
+  flexdashboard::flex_dashboard:
+    code_folding: hide
+    theme: sandstone
+    orientation: columns
+---
+
+```{r librerias utilizadas, include=FALSE}  
+
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(leaflet)
+library(sf)
+library(DT)
+library(rgdal) 
+library(readxl)
+library(readr)
+library(lubridate)
+library(stringi)
+library(flexdashboard)
+library(terra)
+```
+
+```{r, Datos a utilizar sobre estadisticas-policiales y transformacion de datos, include=FALSE}  
+
+estad_policiales <-
+  readxl::read_excel("C:/Users/PC/Tarea 3/estadisticaspoliciales2021.xls")
+
+estad_policiales$Fecha <- as.Date(estad_policiales$Fecha, format = "%d/%m/%Y")
+```
+
+
+```{r, Datos a utilizar sobre cantones de Costa Rica y transformacion de datos, message=FALSE}
+
+cantones <-
+  st_read(
+    dsn = "C:/Users/PC/Tarea 3/cantones_simplificados.geojson",
+    quiet = TRUE
+  )
+
+cantones <-
+  cantones %>%
+  st_transform(5367) %>%
+  st_simplify(dTolerance = 100) %>% 
+  st_transform(4326)
+```  
+
+Sección 1
+===============================================================
+Column {data-width=1000}
+-----------------------------------------------------------------------
+### Tercer tarea del curso Procesamiento de Datos Geográficos GF-0604
+
+Universidad de Costa Rica
+
+Escuela de Geografía
+
+Profesor: 
+Manuel Vargas del Valle
+
+Estudiantes:
+Arroyo Elizondo Mariano - C10718 y Báez Marín Pedro - C10843
+
+I Ciclo 2022
+
+Row {.tabset .tabset-fade}
+----------------------------------------------------------------------------
+
+### Información sobre este proyecto 
+
+* La presente sección muestra información general sobre el proyecto 
+* La sección 2 muestra un mapa, acompañado de tablas y gráficos generados a partir de los datos recopilados por el [IGN](https://www.snitcr.go.cr/ign_ign) sobre los cantones de Costa Rica y los datos del [OIJ](https://sitiooij.poder-judicial.go.cr/) que muestran las estadisticas policiales del 2021.
+
+
+Sección 2
+===============================================================
+Column {data-width=600}
+-----------------------------------------------------------------------
+
+### Mapa de coropletas con la cantidad de delitos en los cantones de Costa Rica
+
+```{r, agregar cantones}
+estad_policiales <-
+  estad_policiales %>%
+  mutate(Canton = if_else(Canton == "LEON CORTES", "LEON CORTES CASTRO", Canton)) %>%
+  mutate(Canton = if_else(Canton == "VASQUEZ DE CORONADO", "VAZQUEZ DE CORONADO", Canton))
+```
+
+
+```{r, Carga de datos, message=FALSE, echo=FALSE, warning=FALSE}  
+
+cantones <-
+  cantones %>%
+  mutate(cantones_normalizados = tolower(stri_trans_general(canton, id = "Latin-ASCII")))
+
+delitos <-
+  estad_policiales %>%
+  mutate(cantones_normalizados = tolower(stri_trans_general(Canton, id = "Latin-ASCII")))
+```
+
+```{r, Creación del mapa, include=FALSE}  
+
+delitos %>%
+  left_join(
+    dplyr::select(
+      st_drop_geometry(cantones),
+      cantones_normalizados,
+      cod_canton
+    ),
+    by = "cantones_normalizados",
+    copy = FALSE,
+    keep = FALSE
+  ) %>%
+  filter(is.na(cod_canton) &
+           cantones_normalizados != "desconocido") %>%
+  distinct(cantones_normalizados) 
+
+delitos <-
+  estad_policiales %>%
+  mutate(Canton = if_else(Canton == "LEON CORTES", "LEON CORTES CASTRO", Canton)) %>%
+  mutate(Canton = if_else(Canton == "VASQUEZ DE CORONADO", "VAZQUEZ DE CORONADO", Canton))  
+
+delitos <-
+  estad_policiales %>%
+  mutate(cantones_normalizados = tolower(stri_trans_general(Canton, id = "Latin-ASCII")))  
+
+delitos %>%
+  left_join(
+    dplyr::select(
+      st_drop_geometry(cantones),
+      cantones_normalizados,
+      cod_canton
+    ),
+    by = "cantones_normalizados",
+    copy = FALSE,
+    keep = FALSE
+  ) %>%
+  
+  filter(is.na(cod_canton) &
+           cantones_normalizados != "desconocido") %>% 
+  distinct(cantones_normalizados) 
+
+delitos <-
+  delitos %>%
+  left_join(
+    dplyr::select(
+      st_drop_geometry(cantones),
+      cod_canton,
+      cantones_normalizados
+    ),
+    by = "cantones_normalizados",
+    copy = FALSE,
+    keep = FALSE
+  )
+
+
+delitos_por_canton <-
+  delitos %>%
+  count(cod_canton, name = "Delitos")
+
+cantones_delitos <-
+  cantones %>%
+  left_join(
+    delitos_por_canton,
+    by = "cod_canton",
+    copy = FALSE,
+    keep = FALSE
+  )
+```
+
+```{r, Mapa leaflet con los delitos por cantón}  
+
+capa_color_cantones_delitos <-
+  colorNumeric(palette = "Reds",
+               domain = cantones_delitos$delitos,
+               na.color = "transparent")
+leaflet() %>%
+  setView(lng = -84.19452,
+          lat = 9.572735,
+          zoom = 7) %>%
+  addTiles(group = "OpenStreetMap") %>%
+  addPolygons(
+    data = cantones_delitos,
+    fillColor = ~ capa_color_cantones_delitos(cantones_delitos$Delitos),
+    fillOpacity = 0.8,
+    color = "black",
+    stroke = TRUE,
+    weight = 1.0,
+    popup = paste(
+      paste(cantones_delitos$canton),
+      paste(cantones_delitos$Delitos),
+      sep =
+    ),
+    group = "Delitos por cantones"
+  ) %>%
+  addLayersControl(
+   
+    baseGroups = c("OpenStreetMap"),
+    overlayGroups = c("Delitos por cantones")
+  ) %>%
+  addLegend(
+    position = "bottomleft",
+    pal = capa_color_cantones_delitos,
+    values = cantones_delitos$Delitos,
+    group = "Delitos",
+    title = "Cantidad de delitos"
+  )
+```
+
+Column {data-width=400}
+-----------------------------------------------------------------------
+### Tabla interactiva con las estadísticas policiales
+
+```{r }
+estad_policiales %>%
+  dplyr::select(Delito, Fecha, Victima, Edad, Genero, Provincia, Canton) %>%
+  datatable(
+    colnames = c(
+      "Delito",
+      "Fecha",
+      "Víctima",
+      "Edad",
+      "Género",
+      "Provincia",
+      "Cantón"
+    ),
+    options = list(
+      pageLength = 15,
+      language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Spanish.json')
+    )
+  )
+```
+
+Sección 2
+===============================================================
+
+
+Column {data-width=1000}
+-----------------------------------------------------------------------
+### Gráfico con la cantidad de delitos en Costa Rica por tipo de delito durante 2021
+
+```{r, Gráfico con la cantidad de delitos por tipo de delito}  
+
+Delitos_por_tipo <-
+  estad_policiales %>%
+  count(Delito) %>%
+  ggplot(aes(x = reorder(Delito, n), y = n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Cantidad de delitos por tipo de delito") +
+  xlab("Tipo de delito") +
+  ylab("Cantidad de delitos") +
+  theme_grey()
+
+ggplotly(Delitos_por_tipo) %>%
+  config(locale = 'es')
+```
+
+Sección 2
+===============================================================
+
+
+Column {data-width=1000}
+-----------------------------------------------------------------------
+### Gráfico con la cantidad de delitos según el tipo de víctima
+
+```{r, Cantidad de delitos por tipo de victima}  
+
+Delitos_segun_victimas <-
+  estad_policiales %>%
+  dplyr::select(Delito, Victima) %>%
+  count(Victima) %>%
+  ggplot(aes(x = reorder(Victima, n), y = n)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Cantidad de delitos por tipo de víctima") +
+  xlab("Tipo de delito") +
+  ylab("Víctima") +
+  theme_grey()
+
+ggplotly(Delitos_segun_victimas) %>%
+  config(locale = 'es')
+```
+
+Sección 2
+===============================================================
+
+
+Column {data-width=1000}
+-----------------------------------------------------------------------
+### Gráfico con la cantidad de delitos registrados en Costa Rica durante Enero hasta Noviembre de 2021
+
+```{r, cantidad de delitos por mes}
+estad_por_mes <-
+  estad_policiales %>% mutate(fecha_mes = lubridate::month(Fecha))
+nombres_estad <-
+  c(
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre"
+  )
+
+graf_delito_mes <-
+  estad_por_mes %>%
+  count(fecha_mes) %>%
+  ggplot(level = levelorder, (aes(
+    x = reorder(nombres_estad, fecha_mes), y = n
+  ))) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Cantidad de delitos registrados en Costa Rica durante enero hasta noviembre de 2021") +
+  xlab("Meses del año") +
+  ylab("Cantidad de delitos") +
+  theme_grey()
+
+ggplotly (graf_delito_mes)
+```
+
+Sección 2
+===============================================================
+
+
+Column {data-width=1000}
+-----------------------------------------------------------------------
+### Gráfico con la proporción de delitos por género en Costa Rica
+
+```{r, proporcion de delitos segun el genero}  
+
+graf_proporcion <-
+  estad_policiales %>%
+  ggplot(aes(x = Delito, fill = Genero)) +
+  geom_bar(position = "fill") +
+  coord_flip() +
+  ggtitle("Gráfico con la proporción de delitos según el género") +
+  xlab("Delito") +
+  ylab("Proporción") +
+  labs(fill = "Género") +
+  theme_grey()
+ggplotly(graf_proporcion) 
+```
